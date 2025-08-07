@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Text to Voice & Echo Bot</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #c3ecf7, #a5dee5, #f3d9fa);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-size: 400% 400%;
+      animation: gradientMove 15s ease infinite;
+    }
+
+    @keyframes gradientMove {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    .container {
+      backdrop-filter: blur(14px);
+      background-color: rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      padding: 40px 30px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+      max-width: 540px;
+      width: 90%;
+      color: #333;
+      text-align: center;
+    }
+
+    h1, h2 {
+      color: #1a237e;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      margin-top: 20px;
+      background-color: rgba(255, 255, 255, 0.9);
+    }
+
+    button {
+      margin: 12px 8px;
+      padding: 12px 24px;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      background-color: #3949ab;
+      color: white;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    button:hover:not(:disabled) {
+      background-color: #1a237e;
+      transform: scale(1.05);
+    }
+
+    button:disabled {
+      background-color: #bbb;
+      cursor: not-allowed;
+    }
+
+    .section {
+      margin-top: 40px;
+    }
+
+    #audioContainer,
+    #echoContainer {
+      display: none;
+      margin-top: 20px;
+    }
+
+    audio {
+      width: 100%;
+      margin-top: 12px;
+    }
+
+    .info {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #555;
+    }
+
+    #recordingIndicator {
+      margin-top: 10px;
+      font-weight: bold;
+      color: red;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Text to Speech Section -->
+    <h2>Text to Voice Generator</h2>
+    <input type="text" id="textInput" placeholder="Type something you want to hear" />
+    <br />
+    <button onclick="generateVoice()">Generate Voice</button>
+
+    <div id="audioContainer">
+      <p class="info">Playing your voice message</p>
+      <audio id="audioPlayer" controls></audio>
+    </div>
+
+    <!-- Echo Bot Section -->
+    <div class="section">
+      <h1>Echo Bot</h1>
+      <button id="startBtn" onclick="startRecording()">Start Recording</button>
+      <button id="stopBtn" onclick="stopRecording()" disabled>Stop Recording</button>
+      <p id="recordingIndicator"></p>
+
+      <div id="echoContainer">
+        <p class="info">Playing your recorded voice</p>
+        <audio id="echoAudio" controls></audio>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Text to Speech
+    async function generateVoice() {
+      const text = document.getElementById("textInput").value;
+      if (text.trim() === "") {
+        alert("Please enter some text");
+        return;
+      }
+
+      try {
+        const response = await fetch("http://localhost:8000/generate-voice", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text })
+        });
+
+        const result = await response.json();
+        const audioUrl = result?.data?.audio_url ||
+                         "https://murf.ai/user-upload/one-day-temp/6870c524-8483-432a-b36d-4d66ef03f50d.wav";
+
+        if (audioUrl) {
+          const audioPlayer = document.getElementById("audioPlayer");
+          audioPlayer.src = audioUrl;
+          document.getElementById("audioContainer").style.display = "block";
+        } else {
+          alert("Voice generation failed. Please try again.");
+        }
+      } catch (error) {
+        alert("Error connecting to backend");
+        console.error(error);
+      }
+    }
+
+    // Echo Bot
+    let mediaRecorder;
+    let audioChunks = [];
+
+    function startRecording() {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.start();
+          audioChunks = [];
+
+          mediaRecorder.addEventListener("dataavailable", event => {
+            audioChunks.push(event.data);
+          });
+
+          mediaRecorder.addEventListener("stop", () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const echoAudio = document.getElementById('echoAudio');
+            echoAudio.src = audioUrl;
+            document.getElementById("echoContainer").style.display = "block";
+            echoAudio.play();
+            document.getElementById("recordingIndicator").textContent = "";
+          });
+
+          document.getElementById("recordingIndicator").textContent = "Recording...";
+          document.getElementById("startBtn").disabled = true;
+          document.getElementById("stopBtn").disabled = false;
+        })
+        .catch(err => {
+          console.error("Microphone access denied:", err);
+          alert("Please allow microphone access to use the Echo Bot");
+        });
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+        document.getElementById("startBtn").disabled = false;
+        document.getElementById("stopBtn").disabled = true;
+        console.log("Recording stopped.");
+      }
+    }
+  </script>
+</body>
+</html>

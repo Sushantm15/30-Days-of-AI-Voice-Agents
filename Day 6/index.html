@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Voice Assistant</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .container {
+      background-color: #1c2b38;
+      padding: 30px;
+      border-radius: 20px;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+      text-align: center;
+      width: 500px;
+    }
+    h1, h2 {
+      color: #42caff;
+      margin-bottom: 20px;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      margin: 10px;
+    }
+    .generate-btn {
+      background-color: #42caff;
+      color: #000;
+    }
+    .start-btn, .stop-btn {
+      background-color: #2bd4ff;
+    }
+    .upload-status {
+      color: limegreen;
+      margin-top: 10px;
+      font-size: 0.9em;
+    }
+    .download-link {
+      display: block;
+      margin-top: 10px;
+      color: #42caff;
+      text-decoration: underline;
+    }
+    audio {
+      margin-top: 20px;
+      width: 100%;
+    }
+    .transcription {
+      color: #fff;
+      background-color: #2c5364;
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: 20px;
+      font-size: 0.95em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Text to Speech</h1>
+    <input type="text" id="textInput" placeholder="Enter text here...">
+    <br>
+    <button class="generate-btn" onclick="generateVoice()">Generate Voice</button>
+
+    <h2>Echo Bot</h2>
+    <button class="start-btn" onclick="startRecording()">🎙 Start</button>
+    <button class="stop-btn" onclick="stopRecording()">⏺ Stop</button>
+
+    <div id="checkboxSuccess" style="margin-top: 10px;">
+      <input type="checkbox" checked disabled>
+    </div>
+
+    <div class="upload-status" id="uploadStatus"></div>
+    <a id="downloadLink" class="download-link" style="display: none;" download>📥 Download File</a>
+    <audio id="audioPlayer" controls></audio>
+    <div class="transcription" id="transcriptionBox" style="display: none;"></div>
+  </div>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+
+    function generateVoice() {
+      const text = document.getElementById("textInput").value;
+      const utterance = new SpeechSynthesisUtterance(text);
+      speechSynthesis.speak(utterance);
+    }
+
+    function startRecording() {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.start();
+          audioChunks = [];
+
+          mediaRecorder.addEventListener("dataavailable", event => {
+            audioChunks.push(event.data);
+          });
+
+          mediaRecorder.addEventListener("stop", () => {
+            const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = document.getElementById("audioPlayer");
+            audio.src = audioUrl;
+
+            document.getElementById("uploadStatus").innerHTML =
+              "✅ Uploaded successfully<br>recording.webm (audio/webm, " +
+              (audioBlob.size / 1024).toFixed(2) + " KB)";
+
+            const downloadLink = document.getElementById("downloadLink");
+            downloadLink.href = audioUrl;
+            downloadLink.download = "recording.webm";
+            downloadLink.style.display = "block";
+
+            uploadAndTranscribe(audioBlob);
+          });
+
+          document.getElementById("uploadStatus").innerHTML = "";
+        });
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+      }
+    }
+
+    function uploadAndTranscribe(audioBlob) {
+      const formData = new FormData();
+      formData.append("file", audioBlob, "recording.webm");
+
+      fetch("http://localhost:8000/transcribe/file", {
+        method: "POST",
+        body: formData
+      })
+      .then(response => response.json())
+      .then(data => {
+        const transcriptionBox = document.getElementById("transcriptionBox");
+        transcriptionBox.innerHTML = "📝 Transcription:<br>" + (data.transcription || "No text found.");
+        transcriptionBox.style.display = "block";
+      })
+      .catch(err => {
+        console.error("Transcription error:", err);
+        document.getElementById("transcriptionBox").innerHTML = "❌ Error during transcription.";
+        document.getElementById("transcriptionBox").style.display = "block";
+      });
+    }
+  </script>
+</body>
+</html>

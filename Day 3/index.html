@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Text to Voice Generator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f2f5;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .container {
+      background-color: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+      max-width: 500px;
+      width: 90%;
+      text-align: center;
+    }
+
+    h2 {
+      color: #333;
+    }
+
+    input[type="text"] {
+      width: 90%;
+      padding: 12px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      margin-top: 20px;
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    #audioContainer {
+      display: none;
+      margin-top: 20px;
+    }
+
+    audio {
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .info {
+      margin-top: 10px;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h2>Text to Voice Generator</h2>
+    <input type="text" id="textInput" placeholder="Type something you want to hear" />
+    <br>
+    <button onclick="generateVoice()">Generate Voice</button>
+
+    <div id="audioContainer">
+      <p class="info">Playing your voice message</p>
+      <audio id="audioPlayer" controls></audio>
+    </div>
+  </div>
+
+  <script>
+    async function generateVoice() {
+      const text = document.getElementById("textInput").value;
+      if (text.trim() === "") {
+        alert("Please enter some text");
+        return;
+      }
+
+      try {
+        const response = await fetch("http://localhost:8000/generate-voice", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ text: text })
+        });
+
+        const result = await response.json();
+        const audioUrl = "https://murf.ai/user-upload/one-day-temp/6870c524-8483-432a-b36d-4d66ef03f50d.wav?response-cache-control=max-age%3D604801&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250804T000000Z&X-Amz-SignedHeaders=host&X-Amz-Expires=259200&X-Amz-Credential=AKIA27M5532DYKBCJICE%2F20250804%2Fus-east-2%2Fs3%2Faws4_request&X-Amz-Signature=ea3bfd2a16ad1695df21133204a932e2946ad0fff6c2acdf744e3f8dffc4b792";
+
+        if (audioUrl) {
+          const audioPlayer = document.getElementById("audioPlayer");
+          audioPlayer.src = audioUrl;
+          document.getElementById("audioContainer").style.display = "block";
+        } else {
+          alert("Voice generation failed. Please try again.");
+        }
+      } catch (error) {
+        alert("Error connecting to backend");
+        console.error(error);
+      }
+    }
+  </script>
+
+</body>
+</html>
