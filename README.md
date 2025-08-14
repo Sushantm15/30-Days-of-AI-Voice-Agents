@@ -93,21 +93,26 @@ Click the 🎤 Start Recording button and talk to your assistant
 │ │── main.py / app.py # FastAPI or Flask backend for Day 1
 │ │── requirements.txt # Python dependencies for Day 1
 │
+
 │── Day 2/
 │ │── index.html
 │ │── main.py / app.py
 │ │── requirements.txt
 │
+
 │── ...
 │
+
 │── Day 12/
 │ │── index.html
 │ │── main.py / app.py
 │ │── requirements.txt
 │
+
 │── images/ # Project screenshots & architecture diagrams
 │ │── Architecture.png
 │
+
 │── README.md # Project documentation
 
 
