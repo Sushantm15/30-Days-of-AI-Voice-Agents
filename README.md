@@ -44,7 +44,6 @@ The AI Voice Assistant:
 
 ![Architecture Diagram](https://github.com/Sushantm15/30-Days-of-AI-Voice-Agents/blob/main/images/Architecture.png?raw=true)
 
-
 ## ✨ Key Features
 
 - **🎤 Voice Recording & Processing** – Record user audio directly from the browser and send it to the backend for processing.
