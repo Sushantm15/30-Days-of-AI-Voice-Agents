@@ -42,7 +42,7 @@ The AI Voice Assistant:
 
 ## 🏗️ Architecture
 
-![Architecture Diagram](https://github.com/Sushantm15/30-Days-of-AI-Voice-Agents/blob/main/images/Architecture.png?raw=true)
+![Architecture Diagram](images/Archtitecture.png)
 
 ## ✨ Key Features
 
