@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Voice Assistant</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .container {
+      background-color: #1c2b38;
+      padding: 30px;
+      border-radius: 20px;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+      text-align: center;
+      width: 520px;
+    }
+    h1 {
+      color: #42caff;
+      margin-bottom: 20px;
+    }
+    #recordBtn {
+      background-color: #ff4d4d;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      padding: 30px 40px;
+      font-size: 20px;
+      cursor: pointer;
+      outline: none;
+      transition: transform 0.2s ease, background-color 0.3s ease;
+    }
+    #recordBtn:hover {
+      background-color: #e63939;
+      transform: scale(1.05);
+    }
+    #recordBtn.recording {
+      animation: pulse 1.2s infinite;
+      background-color: #d93636;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.15); }
+      100% { transform: scale(1); }
+    }
+    .upload-status {
+      color: limegreen;
+      margin-top: 10px;
+      font-size: 0.9em;
+    }
+    .transcription {
+      color: #fff;
+      background-color: #2c5364;
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: 20px;
+      font-size: 0.95em;
+      word-break: break-word;
+      display: none;
+    }
+    audio { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Conversational Agent</h1>
+    <button id="recordBtn">🎤 Start Recording</button>
+    <div class="upload-status" id="uploadStatus"></div>
+    <audio id="audioPlayer" autoplay></audio>
+    <div class="transcription" id="transcriptionBox"></div>
+  </div>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let recordingMime = "audio/webm";
+    let isRecording = false;
+
+    const SERVER_BASE = window.location.origin; // uses same server where FastAPI runs
+
+    const recordBtn = document.getElementById("recordBtn");
+    const audioPlayer = document.getElementById("audioPlayer");
+
+    recordBtn.addEventListener("click", () => {
+      if (!isRecording) startRecording();
+      else stopRecording();
+    });
+
+    async function startRecording() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.addEventListener("dataavailable", event => {
+          if (event.data && event.data.size > 0) audioChunks.push(event.data);
+        });
+
+        mediaRecorder.addEventListener("start", () => {
+          isRecording = true;
+          recordBtn.textContent = "⏹ Stop Recording";
+          recordBtn.classList.add("recording");
+          document.getElementById("uploadStatus").innerText = "Recording...";
+          document.getElementById("transcriptionBox").style.display = "none";
+        });
+
+        mediaRecorder.addEventListener("stop", async () => {
+          isRecording = false;
+          recordBtn.textContent = "🎤 Start Recording";
+          recordBtn.classList.remove("recording");
+
+          const audioBlob = new Blob(audioChunks, { type: recordingMime });
+          document.getElementById("uploadStatus").innerText =
+            "✅ Recorded locally — size: " + (audioBlob.size / 1024).toFixed(2) + " KB";
+
+          await processConversation(audioBlob);
+        });
+
+        mediaRecorder.start();
+      } catch (err) {
+        console.error("Mic access error:", err);
+        document.getElementById("uploadStatus").innerText = "❌ Mic access error";
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop();
+    }
+
+    async function processConversation(audioBlob) {
+      try {
+        // 1. Send audio to STT
+        const formData = new FormData();
+        formData.append("file", audioBlob, "recording.webm");
+
+        const sttResp = await fetch(`${SERVER_BASE}/stt`, {
+          method: "POST",
+          body: formData
+        });
+        const sttData = await sttResp.json();
+        const userText = sttData.text || "";
+
+        // 2. Send transcription to LLM
+        const llmResp = await fetch(`${SERVER_BASE}/llm/query`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: userText })
+        });
+        const llmData = await llmResp.json();
+        const botResponse = llmData.response || "";
+
+        // Update UI
+        const transcriptionBox = document.getElementById("transcriptionBox");
+        transcriptionBox.innerHTML =
+          `📝 You:<br>${userText}<br><br>🤖 Bot:<br>${botResponse}`;
+        transcriptionBox.style.display = "block";
+
+        // 3. Convert bot response to speech
+        const ttsResp = await fetch(`${SERVER_BASE}/tts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: botResponse })
+        });
+
+        if (!ttsResp.ok) throw new Error("TTS failed");
+
+        const audioBlobResp = await ttsResp.blob();
+        const audioUrl = URL.createObjectURL(audioBlobResp);
+        audioPlayer.src = audioUrl;
+        await audioPlayer.play();
+
+        document.getElementById("uploadStatus").innerText = "✅ Conversation complete!";
+      } catch (err) {
+        console.error("Conversation error:", err);
+        document.getElementById("uploadStatus").innerText = "❌ Error: " + err.message;
+      }
+    }
+  </script>
+</body>
+</html>
