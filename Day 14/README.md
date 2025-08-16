@@ -103,22 +103,38 @@ Click 🎤 Start Recording and talk to your assistant
 ##📦 Folder Structure (Refactored)
 
 │── Day 14/
+
 │   │── index.html           # Frontend UI
+
 │   │── main.py              # FastAPI backend entry point
+
 │   │── requirements.txt     # Dependencies
+
 │   │── .env                 # API keys
+
 │   │── services/            # Refactored services
+
 │   │   │── stt_service.py   # Handles Speech-to-Text
+
 │   │   │── llm_service.py   # Handles Google Gemini
+
 │   │   │── tts_service.py   # Handles Murf AI
+
 │   │
+
 │   │── models/              # Pydantic schemas
+
 │   │   │── request.py
+
 │   │   │── response.py
+
 │
 │── images/                  # Project screenshots & architecture diagrams
+
 │   │── Architecture.png
+
 │
+
 │── README.md                # Project documentation
 
 
