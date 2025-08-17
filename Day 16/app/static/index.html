@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Day 16: Audio Streaming</title>
+</head>
+<body>
+  <button id="startBtn">🎙️ Start Streaming</button>
+  <button id="stopBtn">⏹️ Stop</button>
+
+  <script>
+    let ws;
+    let mediaRecorder;
+
+    document.getElementById("startBtn").onclick = async () => {
+      ws = new WebSocket("ws://localhost:8000/ws/audio");
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+          event.data.arrayBuffer().then(buffer => {
+            ws.send(buffer);
+          });
+        }
+      };
+
+      mediaRecorder.start(250); // send every 250ms
+    };
+
+    document.getElementById("stopBtn").onclick = () => {
+      mediaRecorder.stop();
+      ws.close();
+    };
+  </script>
+</body>
+</html>
