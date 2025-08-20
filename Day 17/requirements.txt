@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+requests
+python-dotenv
+python-multipart
+assemblyai
+aiofiles
+google-generativeai
+pydantic
+SpeechRecognition
+gTTS
+websockets  
