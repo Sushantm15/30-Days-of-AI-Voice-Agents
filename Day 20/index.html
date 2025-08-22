@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Voice Chat</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5; }
+        h1 { color: #333; }
+        button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
+        #transcript, #aiResponse { background: #fff; padding: 10px; margin: 10px 0; border-radius: 5px; min-height: 50px; }
+    </style>
+</head>
+<body>
+    <h1>Live Voice Chat with AI</h1>
+    <button id="startBtn">Start Talking</button>
+    <div id="transcript"></div>
+    <div id="aiResponse"></div>
+
+    <script>
+        const startBtn = document.getElementById("startBtn");
+        const transcriptDiv = document.getElementById("transcript");
+        const aiDiv = document.getElementById("aiResponse");
+
+        let ws, audioContext, input;
+
+        startBtn.onclick = async () => {
+            ws = new WebSocket("ws://localhost:8000/ws/llm-murf");
+            ws.binaryType = "arraybuffer";
+
+            ws.onopen = () => console.log("Connected to server");
+            ws.onclose = () => console.log("Connection closed");
+            ws.onerror = (err) => console.error("WebSocket error:", err);
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+
+                    if (msg.transcript) {
+                        transcriptDiv.innerText += "User: " + msg.transcript + "\n";
+                    }
+
+                    if (msg.audio_chunk) {
+                        aiDiv.innerText += "[Audio Received]\n";
+
+                        const audioData = Uint8Array.from(atob(msg.audio_chunk), c => c.charCodeAt(0)).buffer;
+
+                        audioContext.decodeAudioData(audioData, (buffer) => {
+                            const source = audioContext.createBufferSource();
+                            source.buffer = buffer;
+                            source.connect(audioContext.destination);
+                            source.start(0);
+                        });
+                    }
+                } catch (err) {
+                    console.error("Error parsing message:", err);
+                }
+            };
+
+            // Setup AudioContext
+            audioContext = new AudioContext({ sampleRate: 44100 });
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            input = audioContext.createMediaStreamSource(stream);
+
+            // Define AudioWorkletProcessor inline
+            const workletCode = `
+                class RecorderProcessor extends AudioWorkletProcessor {
+                    process(inputs, outputs, parameters) {
+                        const input = inputs[0];
+                        if (input.length > 0) {
+                            const channelData = input[0];
+                            const buffer = new ArrayBuffer(channelData.length * 2);
+                            const view = new DataView(buffer);
+                            for (let i = 0; i < channelData.length; i++) {
+                                let s = Math.max(-1, Math.min(1, channelData[i]));
+                                view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                            }
+                            this.port.postMessage(buffer);
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('recorder-processor', RecorderProcessor);
+            `;
+
+            const blob = new Blob([workletCode], { type: 'application/javascript' });
+            const url = URL.createObjectURL(blob);
+            await audioContext.audioWorklet.addModule(url);
+
+            const recorder = new AudioWorkletNode(audioContext, 'recorder-processor');
+
+            recorder.port.onmessage = (event) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(event.data); // send raw audio buffer to server
+                }
+            };
+
+            input.connect(recorder).connect(audioContext.destination);
+        };
+    </script>
+</body>
+</html>
