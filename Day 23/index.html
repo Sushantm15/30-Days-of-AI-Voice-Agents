@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Voice Chat with AI</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5; }
+        h1 { color: #333; }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-bottom: 20px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #transcript, #aiResponse {
+            background: #fff;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            min-height: 50px;
+            white-space: pre-line;
+            font-size: 14px;
+        }
+        audio { display: block; margin-top: 15px; width: 100%; }
+    </style>
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    <h1>Live Voice Chat with AI</h1>
+    <button id="startBtn">Start Talking</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <audio id="audioPlayer" controls autoplay></audio>
+    <div id="transcript"></div>
+    <div id="aiResponse"></div>
+
+    <script>
+        const startBtn = document.getElementById("startBtn");
+        const stopBtn = document.getElementById("stopBtn");
+        const transcriptDiv = document.getElementById("transcript");
+        const aiDiv = document.getElementById("aiResponse");
+        const audioPlayer = document.getElementById("audioPlayer");
+
+        let ws, audioContext, input, recorder, workletUrl;
+        const audioQueue = [];
+
+        startBtn.onclick = async () => {
+            startBtn.disabled = true;
+            startBtn.innerText = "Listening...";
+            stopBtn.disabled = false;
+
+            // Connect WebSocket
+            ws = new WebSocket("ws://localhost:8000/ws/llm-murf");
+            ws.binaryType = "arraybuffer";
+
+            ws.onopen = () => console.log("✅ Connected to server");
+            ws.onclose = () => {
+                console.log("❌ Connection closed");
+                cleanupAfterStop();
+            };
+            ws.onerror = (err) => console.error("WebSocket error:", err);
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+
+                    // optional transcript sent by server
+                    if (msg.transcript) {
+                        transcriptDiv.innerText += `User: ${msg.transcript}\n`;
+                    }
+
+                    // audio_chunk is expected as base64 WAV (per server format=WAV)
+                    if (msg.audio_chunk) {
+                        aiDiv.innerText += "[AI Audio Received]\n";
+
+                        // Convert base64 to ArrayBuffer and play as WAV
+                        const audioData = base64ToArrayBuffer(msg.audio_chunk);
+                        const blob = new Blob([audioData], { type: "audio/wav" });
+                        const url = URL.createObjectURL(blob);
+
+                        audioQueue.push(url);
+                        playQueue();
+                    }
+
+                    // server signals stream end
+                    if (msg.eof || msg.final) {
+                        aiDiv.innerText += "[AI Stream Finished]\n";
+                        // re-enable start button and disable stop
+                        cleanupAfterStop();
+                    }
+                } catch (err) {
+                    console.error("Error parsing message:", err);
+                }
+            };
+
+            // Setup mic capture with sampleRate 44100 to match Murf WS param
+            audioContext = new AudioContext({ sampleRate: 44100 });
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            input = audioContext.createMediaStreamSource(stream);
+
+            const workletCode = `
+                class RecorderProcessor extends AudioWorkletProcessor {
+                    process(inputs) {
+                        const input = inputs[0];
+                        if (input && input.length > 0) {
+                            const channelData = input[0];
+                            const buffer = new ArrayBuffer(channelData.length * 2);
+                            const view = new DataView(buffer);
+                            for (let i = 0; i < channelData.length; i++) {
+                                let s = Math.max(-1, Math.min(1, channelData[i]));
+                                view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                            }
+                            this.port.postMessage(buffer);
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('recorder-processor', RecorderProcessor);
+            `;
+            const blob = new Blob([workletCode], { type: 'application/javascript' });
+            workletUrl = URL.createObjectURL(blob);
+            await audioContext.audioWorklet.addModule(workletUrl);
+
+            recorder = new AudioWorkletNode(audioContext, 'recorder-processor');
+            recorder.port.onmessage = (event) => {
+                // only send when websocket is open
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    try {
+                        ws.send(event.data);
+                    } catch (e) {
+                        console.error("Failed to send audio chunk:", e);
+                    }
+                }
+            };
+            input.connect(recorder);
+        };
+
+        // Stop button sends EOF and stops capture
+        stopBtn.onclick = async () => {
+            // send EOF message so server knows input is done
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                try {
+                    ws.send(JSON.stringify({ eof: true }));
+                } catch (e) {
+                    console.error("Failed to send EOF:", e);
+                }
+            }
+            cleanupAfterStop();
+        };
+
+        function cleanupAfterStop() {
+            startBtn.disabled = false;
+            startBtn.innerText = "Start Talking";
+            stopBtn.disabled = true;
+
+            // disconnect recorder and audio nodes
+            try {
+                if (recorder) {
+                    recorder.port.onmessage = null;
+                    recorder.disconnect();
+                    recorder = null;
+                }
+                if (input) {
+                    input.disconnect();
+                    input = null;
+                }
+                if (audioContext) {
+                    audioContext.close();
+                    audioContext = null;
+                }
+                if (workletUrl) {
+                    URL.revokeObjectURL(workletUrl);
+                    workletUrl = null;
+                }
+            } catch (e) {
+                console.warn("Error during cleanup:", e);
+            }
+        }
+
+        function playQueue() {
+            if (audioQueue.length > 0 && audioPlayer.paused) {
+                audioPlayer.src = audioQueue.shift();
+                audioPlayer.play().then(() => {
+                    audioPlayer.onended = playQueue;
+                }).catch(err => console.error("Audio playback error:", err));
+            }
+        }
+
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+            return bytes.buffer;
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Agent with Persona</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        h1 {
+            color: #4cafef;
+        }
+        select, button {
+            padding: 10px;
+            margin: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+        }
+        select {
+            width: 220px;
+        }
+        button {
+            background-color: #4cafef;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #2a8fdb;
+        }
+        #status {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #f5f5f5;
+        }
+        #response {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #f5f5f5;
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 5px;
+            width: 80%;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <h1>AI Voice Agent - Add Persona</h1>
+    
+    <!-- Persona Selection -->
+    <label for="persona">Choose Agent Persona:</label>
+    <select id="persona">
+        <option value="Default">Default</option>
+        <option value="Pirate">Pirate 🏴‍☠️</option>
+        <option value="Cowboy">Cowboy 🤠</option>
+        <option value="Robot">Robot 🤖</option>
+        <option value="Comedian">Comedian 😂</option>
+        <option value="Teacher">Teacher 👩‍🏫</option>
+    </select>
+    
+    <!-- Start Recording -->
+    <button id="start">🎤 Start Talking</button>
+    
+    <!-- Stop Recording -->
+    <button id="stop">⛔ Stop</button>
+    
+    <!-- Status -->
+    <div id="status">Status: Idle</div>
+    
+    <!-- Response -->
+    <div id="response">Agent Response will appear here...</div>
+    
+    <script>
+        let ws;
+        const startBtn = document.getElementById('start');
+        const stopBtn = document.getElementById('stop');
+        const statusDiv = document.getElementById('status');
+        const responseDiv = document.getElementById('response');
+
+        startBtn.addEventListener('click', () => {
+            const persona = document.getElementById('persona').value;
+            ws = new WebSocket(`ws://127.0.0.1:8000/ws/llm-murf?persona=${encodeURIComponent(persona)}`);
+            ws.onopen = () => {
+                statusDiv.textContent = `Status: Connected with persona "${persona}"`;
+            };
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.transcript) {
+                    responseDiv.textContent = "Transcript: " + data.transcript;
+                }
+                if (data.agent_response) {
+                    responseDiv.textContent = "Agent Response: " + data.agent_response;
+                }
+            };
+            ws.onclose = () => {
+                statusDiv.textContent = "Status: Disconnected";
+            };
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (ws) {
+                ws.close();
+            }
+        });
+    </script>
+</body>
+</html>

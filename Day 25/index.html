@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Persona Chatbot (Voice Only)</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #1e1e1e;
+        color: #fff;
+        margin: 0;
+        padding: 0;
+    }
+    .chat-container {
+        max-width: 700px;
+        margin: 40px auto;
+        background: #2c2c2c;
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        height: 80vh;
+        overflow: hidden;
+    }
+    .header {
+        padding: 15px;
+        background: #3a3a3a;
+        text-align: center;
+        font-size: 18px;
+        font-weight: bold;
+    }
+    .chat-box {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .message {
+        max-width: 70%;
+        padding: 10px 15px;
+        border-radius: 10px;
+        word-wrap: break-word;
+    }
+    .bot {
+        background: #444;
+        align-self: flex-start;
+    }
+    select, button {
+        margin: 10px;
+        padding: 8px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+    }
+    select {
+        background: #444;
+        color: white;
+    }
+    button {
+        background: #0078d7;
+        color: white;
+    }
+    audio {
+        margin-top: 5px;
+    }
+</style>
+</head>
+<body>
+<div class="chat-container">
+    <div class="header">Persona Chatbot (Voice Only)</div>
+    
+    <div style="padding: 10px; text-align: center;">
+        <select id="persona">
+            <option value="pirate">Pirate</option>
+            <option value="cowboy">Cowboy</option>
+            <option value="robot">Robot</option>
+            <option value="wizard">Wizard</option>
+            <option value="detective">Detective</option>
+        </select>
+        <button onclick="setPersona()">Set Persona</button>
+        <button onclick="greet()">Greet</button>
+        <button onclick="startSpeech()">🎤 Speak</button>
+    </div>
+
+    <div class="chat-box" id="chatBox"></div>
+</div>
+
+<script>
+const API_URL = "http://127.0.0.1:5000/api";
+let currentPersona = "pirate";
+
+function addMessage(text, audioUrl = null) {
+    const chatBox = document.getElementById('chatBox');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message bot`;
+    msgDiv.innerHTML = text;
+    chatBox.appendChild(msgDiv);
+
+    if (audioUrl) {
+        const audio = document.createElement('audio');
+        audio.src = audioUrl;
+        audio.autoplay = true;
+        chatBox.appendChild(audio);
+    }
+
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+// Set persona
+async function setPersona() {
+    currentPersona = document.getElementById('persona').value;
+    const res = await fetch(`${API_URL}/set_persona`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({persona: currentPersona})
+    });
+    const data = await res.json();
+    if(data.message) addMessage(data.message);
+    if(data.error) addMessage(data.error);
+}
+
+// Greeting
+async function greet() {
+    const res = await fetch(`${API_URL}/greet`);
+    const data = await res.json();
+    addMessage(data.text, `http://127.0.0.1:5000${data.audio_url}`);
+}
+
+// Voice input only
+function startSpeech() {
+    if (!('webkitSpeechRecognition' in window)) {
+        alert("Your browser does not support Speech Recognition");
+        return;
+    }
+    const recognition = new webkitSpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = async function(event) {
+        const speechResult = event.results[0][0].transcript;
+        addMessage(`You said: ${speechResult}`);
+        // send to API
+        const res = await fetch(`${API_URL}/respond`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({message: speechResult})
+        });
+        const data = await res.json();
+        addMessage(data.text, `http://127.0.0.1:5000${data.audio_url}`);
+    };
+
+    recognition.onerror = function(event){
+        console.error(event.error);
+        alert("Speech recognition error: " + event.error);
+    };
+
+    recognition.start();
+}
+</script>
+</body>
+</html>

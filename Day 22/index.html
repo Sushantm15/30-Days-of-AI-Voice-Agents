@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Voice Chat with AI</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5; }
+        h1 { color: #333; }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-bottom: 20px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #transcript, #aiResponse {
+            background: #fff;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            min-height: 50px;
+            white-space: pre-line;
+            font-size: 14px;
+        }
+        audio { display: block; margin-top: 15px; width: 100%; }
+    </style>
+    <!-- Prevent favicon error -->
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    <h1>Live Voice Chat with AI</h1>
+    <button id="startBtn">Start Talking</button>
+    <audio id="audioPlayer" controls autoplay></audio>
+    <div id="transcript"></div>
+    <div id="aiResponse"></div>
+
+    <script>
+        const startBtn = document.getElementById("startBtn");
+        const transcriptDiv = document.getElementById("transcript");
+        const aiDiv = document.getElementById("aiResponse");
+        const audioPlayer = document.getElementById("audioPlayer");
+
+        let ws, audioContext, input;
+        const audioQueue = [];
+
+        startBtn.onclick = async () => {
+            startBtn.disabled = true;
+            startBtn.innerText = "Listening...";
+
+            // Connect to WebSocket route
+            ws = new WebSocket("ws://localhost:8000/ws/llm-murf");
+            ws.binaryType = "arraybuffer";
+
+            ws.onopen = () => console.log("✅ Connected to server");
+            ws.onclose = () => {
+                console.log("❌ Connection closed");
+                startBtn.disabled = false;
+                startBtn.innerText = "Start Talking";
+            };
+            ws.onerror = (err) => console.error("WebSocket error:", err);
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+
+                    if (msg.type === "transcript" && msg.text) {
+                        transcriptDiv.innerText += `User: ${msg.text}\n`;
+                    }
+
+                    if (msg.type === "ai_response" && msg.text) {
+                        aiDiv.innerText += `AI: ${msg.text}\n`;
+                    }
+
+                    if (msg.type === "audio_chunk" && msg.audio) {
+                        // Convert base64 to ArrayBuffer and enqueue for playback
+                        const audioData = base64ToArrayBuffer(msg.audio);
+                        const blob = new Blob([audioData], { type: "audio/wav" });
+                        const url = URL.createObjectURL(blob);
+                        audioQueue.push(url);
+                        playQueue();
+                    }
+                } catch (err) {
+                    console.error("Error parsing message:", err);
+                }
+            };
+
+            // Capture mic audio and send to backend
+            audioContext = new AudioContext({ sampleRate: 16000 });
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            input = audioContext.createMediaStreamSource(stream);
+
+            const workletCode = `
+                class RecorderProcessor extends AudioWorkletProcessor {
+                    process(inputs) {
+                        const input = inputs[0];
+                        if (input && input.length > 0) {
+                            const channelData = input[0];
+                            const buffer = new ArrayBuffer(channelData.length * 2);
+                            const view = new DataView(buffer);
+                            for (let i = 0; i < channelData.length; i++) {
+                                let s = Math.max(-1, Math.min(1, channelData[i]));
+                                view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                            }
+                            this.port.postMessage(buffer);
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('recorder-processor', RecorderProcessor);
+            `;
+            const blob = new Blob([workletCode], { type: 'application/javascript' });
+            const url = URL.createObjectURL(blob);
+            await audioContext.audioWorklet.addModule(url);
+
+            const recorder = new AudioWorkletNode(audioContext, 'recorder-processor');
+            recorder.port.onmessage = (event) => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(event.data);
+            };
+            input.connect(recorder);
+        };
+
+        function playQueue() {
+            if (audioQueue.length > 0 && audioPlayer.paused) {
+                audioPlayer.src = audioQueue.shift();
+                audioPlayer.play().then(() => {
+                    audioPlayer.onended = playQueue;
+                }).catch(err => console.error("Audio playback error:", err));
+            }
+        }
+
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+            return bytes.buffer;
+        }
+    </script>
+</body>
+</html>

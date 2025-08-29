@@ -1,0 +1,6 @@
+flask
+uvicorn
+python-dotenv
+openai
+pydantic
+gtts
