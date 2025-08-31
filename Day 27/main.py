@@ -145,6 +145,370 @@ app = Flask(__name__)
 CORS(app)
 agent = EnhancedVoiceAgent()
 
+@app.route("/")
+def index():
+    return html_content
+
+html_content = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SoulDMan's AI Chatbot</title>
+<style>
+    body {
+        font-family: 'Segoe UI', Tahoma, sans-serif;
+        background: #0f172a;
+        color: #fff;
+        margin: 0;
+        padding: 0;
+    }
+    .chat-container {
+        max-width: 800px;
+        margin: 30px auto;
+        background: #1e293b;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        height: 85vh;
+        overflow: hidden;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+    .header {
+        background: linear-gradient(90deg, #2563eb, #9333ea);
+        padding: 15px;
+        font-size: 20px;
+        font-weight: bold;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #fff;
+    }
+    .header button {
+        background: rgba(255,255,255,0.2);
+        border: none;
+        border-radius: 8px;
+        padding: 8px 14px;
+        color: #fff;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background 0.2s ease;
+    }
+    .header button:hover {
+        background: rgba(255,255,255,0.4);
+    }
+    .chat-box {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .message {
+        max-width: 75%;
+        padding: 12px 16px;
+        border-radius: 14px;
+        font-size: 15px;
+        line-height: 1.4;
+    }
+    .bot {
+        background: #334155;
+        align-self: flex-start;
+        border-top-left-radius: 0;
+    }
+    .user {
+        background: #2563eb;
+        align-self: flex-end;
+        border-top-right-radius: 0;
+    }
+    .controls {
+        padding: 12px;
+        background: #1e293b;
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        border-top: 1px solid #334155;
+        flex-wrap: wrap;
+    }
+    select, button {
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: none;
+        font-size: 14px;
+        cursor: pointer;
+    }
+    select {
+        background: #334155;
+        color: #fff;
+    }
+    button {
+        background: #2563eb;
+        color: #fff;
+        font-weight: bold;
+        transition: background 0.2s ease;
+    }
+    button:hover {
+        background: #1d4ed8;
+    }
+    audio {
+        margin-top: 8px;
+        display: block;
+    }
+    /* Config Modal */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 200;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        justify-content: center;
+        align-items: center;
+    }
+    .modal-content {
+        background: #1e293b;
+        padding: 24px;
+        border-radius: 12px;
+        width: 90%;
+        max-width: 400px;
+        text-align: center;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    }
+    .modal-content h3 {
+        margin-bottom: 16px;
+        font-size: 20px;
+    }
+    .modal-content input {
+        width: 90%;
+        margin: 10px auto;
+        display: block;
+        padding: 10px;
+        background: #334155;
+        border: none;
+        border-radius: 8px;
+        color: #fff;
+    }
+    .modal-content button {
+        margin: 10px;
+        width: 40%;
+    }
+    @media (max-width: 600px) {
+        .chat-container {
+            height: 90vh;
+            margin: 10px;
+        }
+        .controls {
+            flex-direction: column;
+        }
+    }
+</style>
+</head>
+<body>
+<div class="chat-container">
+    <div class="header">
+        SoulDMan's AI Chatbot
+        <button onclick="openConfig()">⚙ Config</button>
+    </div>
+    
+    <div class="chat-box" id="chatBox"></div>
+
+    <div class="controls" id="controlsSection">
+        <select id="persona">
+            <option value="pirate">Pirate 🏴‍☠️</option>
+            <option value="cowboy">Cowboy 🤠</option>
+            <option value="robot">Robot 🤖</option>
+            <option value="wizard">Wizard 🧙‍♂️</option>
+            <option value="detective">Detective 🕵️</option>
+        </select>
+        <button onclick="setPersona()">Set Persona</button>
+        <button onclick="greet()">Greet</button>
+        <button onclick="startSpeech()">🎤 Speak</button>
+    </div>
+</div>
+
+<!-- Config Modal -->
+<div class="modal" id="configModal">
+    <div class="modal-content">
+        <h3>🔑 API Configuration</h3>
+        <input type="password" id="openaiKey" placeholder="OpenAI API Key">
+        <input type="password" id="openweatherKey" placeholder="OpenWeather API Key">
+        <div>
+            <button onclick="saveKeys()">Save</button>
+            <button onclick="closeConfig()">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_URL = "http://127.0.0.1:5000/api";
+    let currentPersona = "pirate";
+
+    let apiKeys = {
+        openai: localStorage.getItem("openaiKey") || "",
+        openweather: localStorage.getItem("openweatherKey") || ""
+    };
+
+    function loadKeysIntoModal() {
+        document.getElementById('openaiKey').value = apiKeys.openai;
+        document.getElementById('openweatherKey').value = apiKeys.openweather;
+    }
+
+    function addMessage(text, audioUrl = null, sender = 'bot') {
+        const chatBox = document.getElementById('chatBox');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${sender}`;
+        msgDiv.innerHTML = text;
+        chatBox.appendChild(msgDiv);
+        if (audioUrl) {
+            const audio = document.createElement('audio');
+            audio.src = audioUrl;
+            audio.autoplay = true;
+            chatBox.appendChild(audio);
+        }
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function setPersona() {
+        currentPersona = document.getElementById('persona').value;
+        const res = await fetch(`${API_URL}/set_persona`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-openai-key": apiKeys.openai,
+                "x-openweather-key": apiKeys.openweather
+            },
+            body: JSON.stringify({persona: currentPersona})
+        });
+        const data = await res.json();
+        addMessage(data.message || data.error);
+    }
+
+    async function greet() {
+        const res = await fetch(`${API_URL}/greet`, {
+            headers: {
+                "x-openai-key": apiKeys.openai,
+                "x-openweather-key": apiKeys.openweather
+            }
+        });
+        const data = await res.json();
+        addMessage(data.text, `http://127.0.0.1:5000${data.audio_url}`);
+    }
+
+    function startSpeech() {
+        if (!('webkitSpeechRecognition' in window)) {
+            alert("Speech Recognition not supported.");
+            return;
+        }
+        const recognition = new webkitSpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onresult = async function(event) {
+            const speechResult = event.results[0][0].transcript;
+            addMessage(`You: ${speechResult}`, null, 'user');
+            const res = await fetch(`${API_URL}/respond`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-openai-key": apiKeys.openai,
+                    "x-openweather-key": apiKeys.openweather
+                },
+                body: JSON.stringify({message: speechResult})
+            });
+            const data = await res.json();
+            addMessage(data.text, `http://127.0.0.1:5000${data.audio_url}`);
+        };
+
+        recognition.onerror = function(event){
+            console.error(event.error);
+            alert("Speech recognition error: " + event.error);
+        };
+
+        recognition.start();
+    }
+
+    function openConfig() {
+        loadKeysIntoModal();
+        document.getElementById('configModal').style.display = 'flex';
+    }
+
+    function closeConfig() {
+        document.getElementById('configModal').style.display = 'none';
+    }
+
+    function showSkillButtons() {
+        if(document.getElementById("skillButtonsContainer")) return;
+        const controls = document.getElementById('controlsSection');
+        const container = document.createElement("div");
+        container.id = "skillButtonsContainer";
+        container.style.display = "flex";
+        container.style.gap = "10px";
+        container.style.marginTop = "10px";
+
+        const weatherBtn = document.createElement("button");
+        weatherBtn.innerText = "🌤 Weather (India)";
+        weatherBtn.onclick = fetchWeatherIndia;
+
+        const timeBtn = document.createElement("button");
+        timeBtn.innerText = "⏰ Time (India)";
+        timeBtn.onclick = showTimeIndia;
+
+        container.appendChild(weatherBtn);
+        container.appendChild(timeBtn);
+        controls.appendChild(container);
+    }
+
+    async function fetchWeatherIndia() {
+        if (!apiKeys.openweather) { alert("OpenWeather API key not set!"); return; }
+        try {
+            const res = await fetch(`${API_URL}/weather_india`, {
+                headers: {"x-openweather-key": apiKeys.openweather}
+            });
+            const data = await res.json();
+            if(data.weather && data.temp) {
+                addMessage(`Weather in India: ${data.weather}, Temp: ${data.temp}°C`);
+            } else {
+                addMessage("Error fetching weather for India.");
+            }
+        } catch (err) {
+            console.error(err);
+            addMessage("Error fetching weather for India.");
+        }
+    }
+
+    function showTimeIndia() {
+        const indiaTime = new Date().toLocaleString("en-US", {timeZone: "Asia/Kolkata"});
+        addMessage(`Current time in India: ${indiaTime}`);
+    }
+
+    async function saveKeys() {
+        const openaiKey = document.getElementById('openaiKey').value.trim();
+        const openweatherKey = document.getElementById('openweatherKey').value.trim();
+        if (openaiKey) { apiKeys.openai = openaiKey; localStorage.setItem("openaiKey", openaiKey);}
+        if (openweatherKey) { apiKeys.openweather = openweatherKey; localStorage.setItem("openweatherKey", openweatherKey);}
+        
+        const res = await fetch(`${API_URL}/update_keys`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({openai_key: apiKeys.openai, openweather_key: apiKeys.openweather})
+        });
+        const data = await res.json();
+        alert(data.message || "Keys updated!");
+        closeConfig();
+        showSkillButtons();
+    }
+
+    if(apiKeys.openai || apiKeys.openweather) { showSkillButtons(); }
+</script>
+</body>
+</html>
+
+"""
 
 # Middleware: apply API keys from headers if sent
 @app.before_request
