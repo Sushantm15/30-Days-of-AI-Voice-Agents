@@ -1,206 +1,241 @@
+#!/usr/bin/env python3
+"""
+AI Voice Agent with Personas, gTTS, OpenAI Weather, Date-Time Skill,
+and Dynamic API Key Config (Day 27 Revamp)
+"""
+
 import os
-import json
-import asyncio
-from fastapi import FastAPI, WebSocket
-from fastapi.responses import HTMLResponse
-import aiohttp
-import time
-import threading
-from typing import Dict, Any, Generator
+import urllib.parse
+from datetime import datetime
+from gtts import gTTS
+import requests
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+from dotenv import load_dotenv
 
-# ========== CONFIG ==========
-ASSEMBLYAI_API_KEY = "your_assemblyai_api_key"
-OPENAI_API_KEY = "your_openai_api_key"
-MURF_API_KEY = "your_murf_api_key"
-CHAT_HISTORY_FILE = "chat_history.json"
+# -------------------- LOAD ENV --------------------
+load_dotenv()
 
-CHUNK_LIMIT = 10  # Process every 10 audio chunks for early transcription
+# Default keys from .env
+DEFAULT_OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+DEFAULT_OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
-# New: stream safety limits and debug toggles
-MAX_TTS_STREAM_BYTES = int(os.getenv("MAX_TTS_STREAM_BYTES", 5 * 1024 * 1024))  # default 5MB
-MAX_TTS_STREAM_SECONDS = int(os.getenv("MAX_TTS_STREAM_SECONDS", 30))  # default 30s
-ENABLE_DEBUG_TIMING = os.getenv("ENABLE_DEBUG_TIMING", "1") != "0"
+if not DEFAULT_OPENAI_API_KEY:
+    print("⚠ Warning: Missing OPENAI_API_KEY in .env file.")
+if not DEFAULT_OPENWEATHER_API_KEY:
+    print("⚠ Warning: Missing OPENWEATHER_API_KEY in .env file.")
 
-# Create FastAPI app
-app = FastAPI()
 
-# Serve index.html
-@app.get("/")
-async def get_index():
-    with open("index.html", "r") as f:
-        return HTMLResponse(content=f.read(), status_code=200)
+# -------------------- AGENT --------------------
+class EnhancedVoiceAgent:
+    def __init__(self):
+        self.personas = {
+            "pirate": {
+                "greeting": "Ahoy there, matey! Welcome aboard me ship!",
+                "movie_quote": "\"But you have heard of me.\" — Pirates of the Caribbean"
+            },
+            "cowboy": {
+                "greeting": "Howdy, partner! What brings ya to these parts?",
+                "movie_quote": "\"I'm your huckleberry.\" — Tombstone"
+            },
+            "robot": {
+                "greeting": "Greetings, human. I am ARIA-7, your artificial intelligence assistant.",
+                "movie_quote": "\"Hi, I'm Chitti the Robot.\" — Enthiran"
+            },
+            "wizard": {
+                "greeting": "Greetings, young apprentice! The ancient magic flows through me.",
+                "movie_quote": "\"You're a wizard, Harry.\" — Harry Potter"
+            },
+            "detective": {
+                "greeting": "Ah, you've arrived. The clues were clear — I was expecting you.",
+                "movie_quote": "\"The game is afoot.\" — Sherlock"
+            }
+        }
+        self.current_persona = "pirate"
+        self.audio_dir = "audio_outputs"
+        os.makedirs(self.audio_dir, exist_ok=True)
 
-# =================== WebSocket for Voice Agent ===================
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    print("✅ WebSocket connection established")
+        # API keys (dynamic)
+        self.openai_api_key = DEFAULT_OPENAI_API_KEY
+        self.openai_model = DEFAULT_OPENAI_MODEL
+        self.openweather_api_key = DEFAULT_OPENWEATHER_API_KEY
 
-    if not os.path.exists(CHAT_HISTORY_FILE):
-        with open(CHAT_HISTORY_FILE, "w") as f:
-            json.dump([], f)
+    def configure_api_keys(self, openai_key=None, weather_key=None):
+        if openai_key:
+            self.openai_api_key = openai_key
+        if weather_key:
+            self.openweather_api_key = weather_key
+        return True
 
-    audio_buffer = []
+    def set_persona(self, persona_name):
+        if persona_name.lower() in self.personas:
+            self.current_persona = persona_name.lower()
+            return True
+        return False
 
-    while True:
+    def apply_persona_style(self, text):
+        style = {
+            "pirate": lambda t: f"Arrr! {t} Ye savvy?",
+            "cowboy": lambda t: f"Well, I reckon {t.lower()}, partner.",
+            "robot": lambda t: f"PROCESSING: {t} END TRANSMISSION.",
+            "wizard": lambda t: f"By my ancient wisdom, {t} So the magic reveals!",
+            "detective": lambda t: f"Elementary! {t} The evidence is clear."
+        }
+        return style.get(self.current_persona, lambda t: t)(text)
+
+    def generate_speech(self, text):
+        """Generate audio using gTTS"""
+        filename = f"{self.audio_dir}/voice_{self.current_persona}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3"
+        styled_text = self.apply_persona_style(text)
+
         try:
-            data = await websocket.receive_bytes()  # Receive binary audio
-
-            audio_buffer.append(data)
-
-            # Process early if we reached CHUNK_LIMIT
-            if len(audio_buffer) >= CHUNK_LIMIT:
-                partial_file = "partial_audio.wav"
-                with open(partial_file, "wb") as f:
-                    for chunk in audio_buffer:
-                        f.write(chunk)
-                print(f"🔊 Processed {len(audio_buffer)} audio chunks")  # limited CMD log
-                audio_buffer.clear()
-
-                transcript = await transcribe_audio(partial_file)
-                if transcript:
-                    print(f"📝 Transcript: {transcript[:100]}...")  # first 100 chars only
-                    await websocket.send_json({"type": "transcript", "text": transcript})
-
-                    llm_response = await get_llm_response(transcript)
-                    print(f"🤖 LLM Response: {llm_response[:100]}...")
-                    await websocket.send_json({"type": "ai_response", "text": llm_response})
-
-                    audio_url = await murf_text_to_speech(llm_response)
-                    if audio_url:
-                        await websocket.send_json({"type": "audio_chunk", "audio_url": audio_url})
-
+            tts = gTTS(text=styled_text, lang='en', slow=False)
+            tts.save(filename)
+            return filename
         except Exception as e:
-            print(f"❌ WebSocket error: {e}")
-            break
+            print(f"gTTS exception: {e}")
+            return None
 
-# ================== Helper Functions ==================
-async def transcribe_audio(audio_file):
-    """Send audio to AssemblyAI for transcription"""
-    upload_url = "https://api.assemblyai.com/v2/upload"
-    headers = {"authorization": ASSEMBLYAI_API_KEY}
+    def greet(self):
+        persona = self.personas[self.current_persona]
+        text = f"{persona['greeting']} {persona['movie_quote']}"
+        audio_file = self.generate_speech(text)
+        return audio_file, text
 
-    with open(audio_file, "rb") as f:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(upload_url, headers=headers, data=f) as resp:
-                res = await resp.json()
-                audio_url = res.get("upload_url")
+    def get_weather(self, city):
+        """Fetch real weather data from OpenWeather API"""
+        if not self.openweather_api_key:
+            return "Weather service API key is missing. Please configure it."
 
-    transcript_endpoint = "https://api.assemblyai.com/v2/transcript"
-    json_data = {"audio_url": audio_url}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(transcript_endpoint, headers=headers, json=json_data) as resp:
-            res = await resp.json()
-            transcript_id = res.get("id")
+        try:
+            city_encoded = urllib.parse.quote(city)
+            url = f"http://api.openweathermap.org/data/2.5/weather?q={city_encoded}&appid={self.openweather_api_key}&units=metric"
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                temp = data["main"]["temp"]
+                description = data["weather"][0]["description"]
+                city_name = data["name"]
+                return f"The current weather in {city_name} is {description} with a temperature of {temp}°C."
+            else:
+                return f"Unable to fetch weather for {city}. Please check the city name."
+        except Exception as e:
+            return f"Error fetching weather: {str(e)}"
 
-    # Poll until transcription done
-    while True:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{transcript_endpoint}/{transcript_id}", headers=headers) as resp:
-                result = await resp.json()
-                status = result.get("status")
-                if status == "completed":
-                    return result.get("text")
-                elif status == "failed":
-                    return "Transcription failed"
-        await asyncio.sleep(2)
+    def get_datetime(self):
+        now = datetime.now()
+        return f"Current date is {now.strftime('%A, %d %B %Y')} and time is {now.strftime('%I:%M %p')}."
 
-async def get_llm_response(prompt):
-    """Send prompt to OpenAI GPT-4 for response"""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "gpt-4",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=data) as resp:
-            res = await resp.json()
-            return res["choices"][0]["message"]["content"]
+    def respond(self, user_input):
+        user_lower = user_input.lower()
+        if "weather" in user_lower:
+            city = user_input.split("in")[-1].strip() if "in" in user_lower else "your city"
+            message_text = self.get_weather(city)
+        elif "time" in user_lower or "date" in user_lower:
+            message_text = self.get_datetime()
+        else:
+            message_text = f"You said: {user_input}"
+        audio_file = self.generate_speech(message_text)
+        return audio_file, message_text
 
-async def murf_text_to_speech(text):
-    """Convert text to speech using Murf API"""
-    url = "https://api.murf.ai/v1/speech"
-    headers = {
-        "Authorization": f"Bearer {MURF_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "voiceId": "en-US-Emily",
-        "text": text,
-        "format": "mp3"
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=payload) as resp:
-            res = await resp.json()
-            return res.get("audioUrl")
 
-def save_chat_history(user_text, bot_response):
-    """Save chat history locally"""
-    if not os.path.exists(CHAT_HISTORY_FILE):
-        with open(CHAT_HISTORY_FILE, "w") as f:
-            json.dump([], f)
-    with open(CHAT_HISTORY_FILE, "r+") as f:
-        data = json.load(f)
-        data.append({"user": user_text, "bot": bot_response})
-        f.seek(0)
-        json.dump(data, f, indent=4)
+# -------------------- FLASK --------------------
+app = Flask(__name__)
+CORS(app)
+agent = EnhancedVoiceAgent()
 
-def send_to_murf_stream(text: str) -> Generator[bytes, None, None]:
-    """
-    Send text to Murf TTS and stream back the audio bytes.
-    Safety: stop after MAX_TTS_STREAM_BYTES or MAX_TTS_STREAM_SECONDS.
-    """
-    headers = {
-        "Authorization": f"Bearer {MURF_API_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg",  # or audio/wav depending on Murf
-    }
-    payload = {
-        "voice": "en-US-Emily",
-        "input": text,
-        "format": "mp3"
-    }
 
-    # Defensive: if no text, yield nothing (caller will handle JSON response)
-    if not text or text.strip() == "":
-        if ENABLE_DEBUG_TIMING:
-            print("send_to_murf_stream: empty assistant text, skipping TTS.")
-        return
-        yield  # generator sentinel (never reached)
+# Middleware: apply API keys from headers if sent
+@app.before_request
+def attach_dynamic_keys():
+    openai_key = request.headers.get("x-openai-key")
+    weather_key = request.headers.get("x-openweather-key")
+    if openai_key or weather_key:
+        agent.configure_api_keys(openai_key=openai_key, weather_key=weather_key)
 
-    start_time = time.time()
-    total_bytes = 0
-    timeout = (10, 60)  # (connect_timeout, read_timeout) adjust as needed
 
+@app.route("/")
+def index():
+    return "AI Voice Agent with gTTS, Personas, Dynamic API Config, OpenAI Weather, and Date-Time Skill"
+
+
+# Unified config endpoint
+@app.route("/api/update_keys", methods=["POST"])
+def update_keys():
+    data = request.json or {}
+    openai_key = data.get("openai_key") or request.headers.get("x-openai-key")
+    weather_key = data.get("openweather_key") or request.headers.get("x-openweather-key")
+    agent.configure_api_keys(openai_key=openai_key, weather_key=weather_key)
+    return jsonify({"message": "API keys updated successfully!"})
+
+
+@app.route("/api/set_persona", methods=["POST"])
+def set_persona():
+    persona = request.json.get("persona", "")
+    if agent.set_persona(persona):
+        return jsonify({"message": f"Persona set to {persona}"})
+    return jsonify({"error": "Invalid persona"}), 400
+
+
+@app.route("/api/greet", methods=["GET"])
+def greet():
+    fn, text = agent.greet()
+    audio_url = f"/audio/{os.path.basename(fn)}" if fn else None
+    return jsonify({"text": text, "audio_url": audio_url})
+
+
+@app.route("/api/weather", methods=["POST"])
+def weather():
+    city = request.json.get("city", "")
+    if not city:
+        return jsonify({"error": "No city provided"}), 400
+    message_text = agent.get_weather(city)
+    audio_file = agent.generate_speech(message_text)
+    audio_url = f"/audio/{os.path.basename(audio_file)}" if audio_file else None
+    return jsonify({"text": message_text, "audio_url": audio_url})
+
+
+# ----------- New endpoint for India weather ----------
+@app.route("/api/weather_india", methods=["GET"])
+def weather_india():
+    if not agent.openweather_api_key:
+        return jsonify({"error": "OpenWeather API key not configured"}), 400
     try:
-        with requests.post(MURF_TTS_ENDPOINT, json=payload, headers=headers, stream=True, timeout=timeout) as r:
-            r.raise_for_status()
-            # Iterate with a moderate chunk size; stop if limits exceeded.
-            for chunk in r.iter_content(chunk_size=4096):
-                if chunk:
-                    total_bytes += len(chunk)
-                    yield chunk
-                    # Stop if exceeded bytes or time limits
-                    elapsed = time.time() - start_time
-                    if total_bytes >= MAX_TTS_STREAM_BYTES:
-                        print(f"send_to_murf_stream: reached MAX_TTS_STREAM_BYTES ({total_bytes} bytes); stopping stream.")
-                        break
-                    if elapsed >= MAX_TTS_STREAM_SECONDS:
-                        print(f"send_to_murf_stream: reached MAX_TTS_STREAM_SECONDS ({elapsed:.1f}s); stopping stream.")
-                        break
-    except requests.HTTPError as e:
-        # propagate to caller via exception, caller will send a JSON error chunk
-        raise
+        city = "Delhi"  # default city in India
+        data = requests.get(
+            f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={agent.openweather_api_key}&units=metric"
+        ).json()
+        temp = data["main"]["temp"]
+        desc = data["weather"][0]["description"]
+        return jsonify({"weather": desc, "temp": temp})
     except Exception as e:
-        # log unexpected errors
-        print(f"send_to_murf_stream: unexpected error: {e}")
-        raise
+        return jsonify({"error": f"Failed to fetch weather: {str(e)}"}), 500
+# ------------------------------------------------------
 
-# ================== Run App ==================
+
+@app.route("/api/datetime", methods=["GET"])
+def datetime_api():
+    message_text = agent.get_datetime()
+    audio_file = agent.generate_speech(message_text)
+    audio_url = f"/audio/{os.path.basename(audio_file)}" if audio_file else None
+    return jsonify({"text": message_text, "audio_url": audio_url})
+
+
+@app.route("/api/respond", methods=["POST"])
+def respond():
+    msg = request.json.get("message", "")
+    if not msg:
+        return {"error": "No message"}, 400
+    fn, text = agent.respond(msg)
+    audio_url = f"/audio/{os.path.basename(fn)}" if fn else None
+    return jsonify({"text": text, "audio_url": audio_url})
+
+
+@app.route("/audio/<path:filename>")
+def audio(filename):
+    return send_from_directory(agent.audio_dir, filename)
+
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=5000, debug=True)
