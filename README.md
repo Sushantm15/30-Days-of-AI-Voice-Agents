@@ -68,7 +68,7 @@ The SouLDMan's AI Chatbot:
 
 ## 🖼️ Screenshots
 
-[![UI Screenshot](images/Screenshot 2025-08-29 083241.png)](images/Screenshot 2025-08-29 083241.png)
+![UI Screenshot](images/ui_screenshot.png)
 
 ---
 
